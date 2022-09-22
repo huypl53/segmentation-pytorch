@@ -37,6 +37,7 @@ def main(args):
     loss_valid = []
 
     step = 0
+    l1_lambda = 1e-3
 
     for epoch in tqdm(range(args.epochs), total=args.epochs):
         for phase in ["train", "valid"]:
@@ -61,6 +62,8 @@ def main(args):
                     y_pred = unet(x)
 
                     loss = dsc_loss(y_pred, y_true)
+                    l1_norm = sum(p.abs().sum() for p in unet.parameters())
+                    loss += l1_lambda*l1_norm
 
                     if phase == "valid":
                         loss_valid.append(loss.item())
