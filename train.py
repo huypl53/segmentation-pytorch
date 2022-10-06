@@ -146,7 +146,7 @@ def datasets(args):
     )
     valid = Dataset(
         images_dir=args.images,
-        subset="validation",
+        subset="val",
         image_size=args.image_size,
         random_sampling=False,
     )
@@ -233,7 +233,7 @@ if __name__ == "__main__":
         "--logs", type=str, default="./logs", help="folder to save logs"
     )
     parser.add_argument(
-        "--images", type=str, default="./kaggle_3m", help="root folder with images"
+        "--images", type=str, default="./data", help="root folder with images"
     )
     parser.add_argument(
         "--image-size",
