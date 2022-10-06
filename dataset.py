@@ -25,104 +25,58 @@ class BrainSegmentationDataset(Dataset):
         validation_cases=10,
         seed=42,
     ):
-        assert subset in ["all", "train", "validation"]
+        assert subset in ["all", "train", "val"]
 
         # read images
-        volumes = {}
-        masks = {}
-        print("reading {} images...".format(subset))
+        volumes = []
+        masks = []
         for (dirpath, dirnames,
              filenames) in os.walk(os.path.join(images_dir, subset, 'images')):
-            image_slices = []
-            mask_slices = []
 
-            for filename in filenames:
+            for filename in filter(lambda x: '.jpeg' in x, filenames):
                 filepath = os.path.join(dirpath, filename)
-                image_slices.append(imread(filepath))
+                volumes.append(filepath)
 
-                maskpath = 'mask_images'.join(filepath.rsplit('images', 1)).replace('.jpeg', '.png')
-                mask_slices.append(imread(maskpath, as_gray=True))
+                maskpath = 'mask_images'.join(filepath.rsplit(
+                    'images', 1)).replace('.jpeg', '.png')
+                masks.append(maskpath)
 
-            # if len(image_slices) > 0:
-                patient_id = filename.rsplit('.', 1)[0]
-                volumes[patient_id] = np.array(image_slices[1:-1])
-                masks[patient_id] = np.array(mask_slices[1:-1])
-
-        self.patients = sorted(volumes)
-
-        # select cases to subset
-        # if not subset == "all":
-        #     random.seed(seed)
-        #     validation_patients = random.sample(self.patients,
-        #                                         k=validation_cases)
-        #     if subset == "validation":
-        #         self.patients = validation_patients
-        #     else:
-        #         self.patients = sorted(
-        #             list(set(self.patients).difference(validation_patients)))
-
-        print("preprocessing {} volumes...".format(subset))
         # create list of tuples (volume, mask)
-        self.volumes = [(volumes[k], masks[k]) for k in self.patients]
-
-        print("cropping {} volumes...".format(subset))
-        # crop to smallest enclosing volume
-        self.volumes = [crop_sample(v) for v in self.volumes]
-
-        print("padding {} volumes...".format(subset))
-        # pad to square
-        self.volumes = [pad_sample(v) for v in self.volumes]
-
-        print("resizing {} volumes...".format(subset))
-        # resize
-        self.volumes = [
-            resize_sample(v, size=image_size) for v in self.volumes
-        ]
-
-        print("normalizing {} volumes...".format(subset))
-        # normalize channel-wise
-        self.volumes = [(normalize_volume(v), m) for v, m in self.volumes]
-
-        # probabilities for sampling slices based on masks
-        self.slice_weights = [
-            m.sum(axis=-1).sum(axis=-1) for v, m in self.volumes
-        ]
-        self.slice_weights = [(s + (s.sum() * 0.1 / len(s))) / (s.sum() * 1.1)
-                              for s in self.slice_weights]
-
-        # add channel dimension to masks
-        self.volumes = [(v, m[..., np.newaxis]) for (v, m) in self.volumes]
-
-        print("done creating {} dataset".format(subset))
+        self.data = list(zip(volumes, masks))
 
         # create global index for patient and slice (idx -> (p_idx, s_idx))
-        num_slices = [v.shape[0] for v, m in self.volumes]
-        self.patient_slice_index = list(
-            zip(
-                sum([[i] * num_slices[i] for i in range(len(num_slices))], []),
-                sum([list(range(x)) for x in num_slices], []),
-            ))
-
         self.random_sampling = random_sampling
 
         self.transform = transform
+        self.image_size = image_size
 
     def __len__(self):
-        return len(self.patient_slice_index)
+        return len((self.data))
 
     def __getitem__(self, idx):
-        patient = self.patient_slice_index[idx][0]
-        slice_n = self.patient_slice_index[idx][1]
+        imagepath, maskpath = self.data[idx]
 
-        if self.random_sampling:
-            patient = np.random.randint(len(self.volumes))
-            slice_n = np.random.choice(range(
-                self.volumes[patient][0].shape[0]),
-                                       p=self.slice_weights[patient])
+        image = np.array(imread(imagepath))
+        mask = np.array(imread(maskpath, as_gray=True))
 
-        v, m = self.volumes[patient]
-        image = v[slice_n]
-        mask = m[slice_n]
+        # if len(mask.shape) < 3:
+        #     mask = np.stack((mask,mask,mask), axis=-1)
+
+        # crop to smallest enclosing volume
+        # image, mask = crop_sample((image, mask))
+
+        # # pad to square
+        (image, mask) = pad_sample((image, mask))
+
+        # resize
+        (image, mask) = resize_sample((image, mask), size=self.image_size)
+
+        # normalize channel-wise
+        (image) = normalize_volume(image)
+
+        # add channel dimension to masks
+        mask = mask[..., np.newaxis]
+
 
         if self.transform is not None:
             image, mask = self.transform((image, mask))

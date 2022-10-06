@@ -9,16 +9,13 @@ def dsc(y_pred, y_true, lcc=True):
         y_pred = np.round(y_pred).astype(int)
         y_true = np.round(y_true).astype(int)
         y_pred = largest_connected_component(y_pred)
-    return np.sum(y_pred[y_true == 1]) * 2.0 / (np.sum(y_pred) + np.sum(y_true))
+    return np.sum(
+        y_pred[y_true == 1]) * 2.0 / (np.sum(y_pred) + np.sum(y_true))
 
 
 def crop_sample(x):
     volume, mask = x
     volume[volume < np.max(volume) * 0.1] = 0
-    z_projection = np.max(np.max(np.max(volume, axis=-1), axis=-1), axis=-1)
-    z_nonzero = np.nonzero(z_projection)
-    z_min = np.min(z_nonzero)
-    z_max = np.max(z_nonzero) + 1
     y_projection = np.max(np.max(np.max(volume, axis=0), axis=-1), axis=-1)
     y_nonzero = np.nonzero(y_projection)
     y_min = np.min(y_nonzero)
@@ -28,24 +25,32 @@ def crop_sample(x):
     x_min = np.min(x_nonzero)
     x_max = np.max(x_nonzero) + 1
     return (
-        volume[z_min:z_max, y_min:y_max, x_min:x_max],
-        mask[z_min:z_max, y_min:y_max, x_min:x_max],
+        volume[y_min:y_max, x_min:x_max],
+        mask[y_min:y_max, x_min:x_max],
     )
 
 
 def pad_sample(x):
     volume, mask = x
-    a = volume.shape[1]
-    b = volume.shape[2]
+    a = volume.shape[0]
+    b = volume.shape[1]
     if a == b:
         return volume, mask
     diff = (max(a, b) - min(a, b)) / 2.0
     if a > b:
-        padding = ((0, 0), (0, 0), (int(np.floor(diff)), int(np.ceil(diff))))
+        padding = (
+            (0, 0),
+            (int(np.floor(diff)), int(np.ceil(diff))),
+            # (0, 0)
+        )
     else:
-        padding = ((0, 0), (int(np.floor(diff)), int(np.ceil(diff))), (0, 0))
+        padding = (
+            (int(np.floor(diff)), int(np.ceil(diff))),
+            (0, 0),
+            # (0, 0)
+        )
     mask = np.pad(mask, padding, mode="constant", constant_values=0)
-    padding = padding + ((0, 0),)
+    padding += ( (0, 0), )
     volume = np.pad(volume, padding, mode="constant", constant_values=0)
     return volume, mask
 
@@ -53,7 +58,7 @@ def pad_sample(x):
 def resize_sample(x, size=256):
     volume, mask = x
     v_shape = volume.shape
-    out_shape = (v_shape[0], size, size)
+    out_shape = (size, size)
     mask = resize(
         mask,
         output_shape=out_shape,
@@ -62,7 +67,8 @@ def resize_sample(x, size=256):
         cval=0,
         anti_aliasing=False,
     )
-    out_shape = out_shape + (v_shape[3],)
+
+    out_shape = out_shape + (v_shape[2], )
     volume = resize(
         volume,
         output_shape=out_shape,
@@ -112,6 +118,6 @@ def outline(image, mask, color):
     mask = np.round(mask)
     yy, xx = np.nonzero(mask)
     for y, x in zip(yy, xx):
-        if 0.0 < np.mean(mask[max(0, y - 1) : y + 2, max(0, x - 1) : x + 2]) < 1.0:
-            image[max(0, y) : y + 1, max(0, x) : x + 1] = color
+        if 0.0 < np.mean(mask[max(0, y - 1):y + 2, max(0, x - 1):x + 2]) < 1.0:
+            image[max(0, y):y + 1, max(0, x):x + 1] = color
     return image

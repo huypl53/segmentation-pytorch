@@ -32,7 +32,7 @@ def main(args):
 
     optimizer = optim.Adam(unet.parameters(), lr=args.lr)
 
-    logger = Logger(args.logs)
+    # logger = Logger(args.logs)
     loss_train = []
     loss_valid = []
 
@@ -79,35 +79,35 @@ def main(args):
                             if i * args.batch_size < args.vis_images:
                                 tag = "image/{}".format(i)
                                 num_images = args.vis_images - i * args.batch_size
-                                logger.image_list_summary(
-                                    tag,
-                                    log_images(x, y_true, y_pred)[:num_images],
-                                    step,
-                                )
+                                # logger.image_list_summary(
+                                #     tag,
+                                #     log_images(x, y_true, y_pred)[:num_images],
+                                #     step,
+                                # )
 
                     if phase == "train":
                         loss_train.append(loss.item())
                         loss.backward()
                         optimizer.step()
 
-                if phase == "train" and (step + 1) % 10 == 0:
-                    log_loss_summary(logger, loss_train, step)
-                    loss_train = []
+                # if phase == "train" and (step + 1) % 10 == 0:
+                #     log_loss_summary(logger, loss_train, step)
+                #     loss_train = []
 
-            if phase == "valid":
-                log_loss_summary(logger, loss_valid, step, prefix="val_")
-                mean_dsc = np.mean(
-                    dsc_per_volume(
-                        validation_pred,
-                        validation_true,
-                        loader_valid.dataset.patient_slice_index,
-                    )
-                )
-                logger.scalar_summary("val_dsc", mean_dsc, step)
-                if mean_dsc > best_validation_dsc:
-                    best_validation_dsc = mean_dsc
-                    torch.save(unet.state_dict(), os.path.join(args.weights, "unet.pt"))
-                loss_valid = []
+            # if phase == "valid":
+            #     log_loss_summary(logger, loss_valid, step, prefix="val_")
+            #     mean_dsc = np.mean(
+            #         dsc_per_volume(
+            #             validation_pred,
+            #             validation_true,
+            #             loader_valid.dataset.patient_slice_index,
+            #         )
+            #     )
+            #     logger.scalar_summary("val_dsc", mean_dsc, step)
+            #     if mean_dsc > best_validation_dsc:
+            #         best_validation_dsc = mean_dsc
+            #         torch.save(unet.state_dict(), os.path.join(args.weights, "unet.pt"))
+            #     loss_valid = []
 
     print("Best validation mean DSC: {:4f}".format(best_validation_dsc))
 
