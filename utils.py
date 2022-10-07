@@ -100,7 +100,7 @@ def log_images(x, y_true, y_pred, channel=1):
         image = outline(image, y_pred_np[i], color=[255, 0, 0])
         image = outline(image, y_true_np[i], color=[0, 255, 0])
         images.append(image)
-    return images
+    return np.array( images )
 
 
 def gray2rgb(image):
