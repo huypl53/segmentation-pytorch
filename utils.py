@@ -1,4 +1,6 @@
 import numpy as np
+import torch
+import sklearn
 from medpy.filter.binary import largest_connected_component
 from skimage.exposure import rescale_intensity
 from skimage.transform import resize
@@ -19,7 +21,6 @@ def iou(y_pred, y_true, lcc=True):
         y_pred = largest_connected_component(y_pred)
     return np.sum(
         y_pred[y_true == 1]) / (np.sum(y_pred) + np.sum(y_true) - y_pred[y_true == 1])
-
 
 def crop_sample(x):
     volume, mask = x
@@ -108,7 +109,7 @@ def log_images(x, y_true, y_pred, channel=1):
         image = outline(image, y_pred_np[i], color=[255, 0, 0])
         image = outline(image, y_true_np[i], color=[0, 255, 0])
         images.append(image)
-    return np.array( images )
+    return np.array( images ).transpose(0, 3, 1, 2)
 
 
 def gray2rgb(image):
@@ -129,3 +130,24 @@ def outline(image, mask, color):
         if 0.0 < np.mean(mask[max(0, y - 1):y + 2, max(0, x - 1):x + 2]) < 1.0:
             image[max(0, y):y + 1, max(0, x):x + 1] = color
     return image
+
+def create_classification_report(model, device, test_loader):
+
+    model.eval()
+    model.to(device)
+
+    y_pred = []
+    y_true = []
+
+    with torch.no_grad():
+        for data in test_loader:
+            y_true += data[1].numpy().tolist()
+            images, _ = data[0].to(device), data[1].to(device)
+            outputs = model(images)
+            _, predicted = torch.max(outputs.data, 1)
+            y_pred += predicted.cpu().numpy().tolist()
+
+    classification_report = sklearn.metrics.classification_report(
+        y_true=y_true, y_pred=y_pred)
+
+    return classification_report
