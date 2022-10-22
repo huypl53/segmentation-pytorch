@@ -1,3 +1,7 @@
+import warnings
+
+warnings.simplefilter("ignore", UserWarning)
+
 import argparse
 import json
 import os
@@ -7,44 +11,35 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from torch.nn.utils import prune
 
 from dataset import BrainSegmentationDataset as Dataset
 from logger import Logger
 from loss import DiceLoss
 from transform import transforms
 from unet import UNet
-from utils import log_images, dsc
+from utils import log_images, dsc, create_classification_report
+from prune import measure_global_sparsity
 
 
-def main(args):
-    makedirs(args)
-    snapshotargs(args)
-    device = torch.device("cpu" if not torch.cuda.is_available() else args.device)
-
-    loader_train, loader_valid = data_loaders(args)
-    loaders = {"train": loader_train, "valid": loader_valid}
-
-    unet = UNet(in_channels=Dataset.in_channels, out_channels=Dataset.out_channels)
-    unet.to(device)
-
+def train_model(model, loaders, args, device):
     dsc_loss = DiceLoss()
     best_validation_dsc = 0.0
 
-    optimizer = optim.Adam(unet.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     logger = Logger(args.logs)
     loss_train = []
     loss_valid = []
 
     step = 0
-    l1_lambda = 1e-3
-
+    l1_regularization_strength = 1e-3
     for epoch in tqdm(range(args.epochs), total=args.epochs):
         for phase in ["train", "valid"]:
             if phase == "train":
-                unet.train()
+                model.train()
             else:
-                unet.eval()
+                model.eval()
 
             validation_pred = []
             validation_true = []
@@ -59,23 +54,36 @@ def main(args):
                 optimizer.zero_grad()
 
                 with torch.set_grad_enabled(phase == "train"):
-                    y_pred = unet(x)
+                    y_pred = model(x)
 
                     loss = dsc_loss(y_pred, y_true)
-                    l1_norm = sum(p.abs().sum() for p in unet.parameters())
-                    loss += l1_lambda*l1_norm
+                    l1_reg = torch.tensor(0.).to(device)
+                    for module in model.modules():
+                        mask = None
+                        weight = None
+                        for name, buffer in module.named_buffers():
+                            if name == "weight_mask":
+                                mask = buffer
+                        for name, param in module.named_parameters():
+                            if name == "weight_orig":
+                                weight = param
+                        # We usually only want to introduce sparsity to weights and prune weights.
+                        # Do the same for bias if necessary.
+                        if mask is not None and weight is not None:
+                            l1_reg += torch.norm(mask * weight, 1)
+
+                    loss += l1_regularization_strength * l1_reg
 
                     if phase == "valid":
                         loss_valid.append(loss.item())
                         y_pred_np = y_pred.detach().cpu().numpy()
                         validation_pred.extend(
-                            [y_pred_np[s] for s in range(y_pred_np.shape[0])]
-                        )
+                            [y_pred_np[s] for s in range(y_pred_np.shape[0])])
                         y_true_np = y_true.detach().cpu().numpy()
                         validation_true.extend(
-                            [y_true_np[s] for s in range(y_true_np.shape[0])]
-                        )
-                        if (epoch % args.vis_freq == 0) or (epoch == args.epochs - 1):
+                            [y_true_np[s] for s in range(y_true_np.shape[0])])
+                        if (epoch % args.vis_freq
+                                == 0) or (epoch == args.epochs - 1):
                             if i * args.batch_size < args.vis_images:
                                 tag = "image/{}".format(i)
                                 num_images = args.vis_images - i * args.batch_size
@@ -96,19 +104,75 @@ def main(args):
 
             if phase == "valid":
                 log_loss_summary(logger, loss_valid, step, prefix="val_")
-                mean_dsc = np.mean(
-                    dsc(
-                        validation_pred,
-                        validation_true,
-                    )
-                )
+                mean_dsc = np.mean(dsc(
+                    validation_pred,
+                    validation_true,
+                ))
                 logger.scalar_summary("val_dsc", mean_dsc, step)
                 if mean_dsc > best_validation_dsc:
                     best_validation_dsc = mean_dsc
-                    torch.save(unet.state_dict(), os.path.join(args.weights, "unet.pt"))
+                    torch.save(
+                        model.state_dict(),
+                        os.path.join(args.weights,
+                                     f'unet-{best_validation_dsc}.pt'))
                 loss_valid = []
-
     print("Best validation mean DSC: {:4f}".format(best_validation_dsc))
+
+
+def main(args):
+    makedirs(args)
+    snapshotargs(args)
+    device = torch.device(
+        "cpu" if not torch.cuda.is_available() else args.device)
+
+    loader_train, loader_valid = data_loaders(args)
+    loaders = {"train": loader_train, "valid": loader_valid}
+
+    model = UNet(in_channels=Dataset.in_channels,
+                 out_channels=Dataset.out_channels)
+    if args.pretrained:
+        model.load_state_dict(
+            torch.load(args.pretrained, map_location=device))
+    model.to(device)
+
+    for i in range(args.prune_iters):
+        if args.grouped_pruning == True:
+            parameters_to_prune = []
+            for module_name, module in model.named_modules():
+                if isinstance(module, torch.nn.Conv2d):
+                    parameters_to_prune.append((module, "weight"))
+            prune.global_unstructured(
+                parameters_to_prune,
+                pruning_method=prune.L1Unstructured,
+                amount=args.conv2d_prune_amount,
+            )
+        else:
+            for module_name, module in model.named_modules():
+                if isinstance(module, torch.nn.Conv2d):
+                    prune.l1_unstructured(module,
+                                          name="weight",
+                                          amount=args.conv2d_prune_amount)
+                elif isinstance(module, torch.nn.Linear):
+                    prune.l1_unstructured(module,
+                                          name="weight",
+                                          amount=args.linear_prune_amount)
+        num_zeros, num_elements, sparsity = measure_global_sparsity(
+            model,
+            weight=True,
+            bias=False,
+            conv2d_use_mask=True,
+            linear_use_mask=False)
+
+        print(f'Model sparsity after {i} iter: {sparsity}')
+        train_model(model, loaders, args, device)
+
+    num_zeros, num_elements, sparsity = measure_global_sparsity(
+        model,
+        weight=True,
+        bias=False,
+        conv2d_use_mask=True,
+        linear_use_mask=False)
+    print(f'Model sparsity at last: {sparsity}')
 
 
 def data_loaders(args):
@@ -141,7 +205,9 @@ def datasets(args):
         images_dir=args.images,
         subset="train",
         image_size=args.image_size,
-        transform=transforms(scale=args.aug_scale, angle=args.aug_angle, flip_prob=0.5),
+        transform=transforms(scale=args.aug_scale,
+                             angle=args.aug_angle,
+                             flip_prob=0.5),
     )
     valid = Dataset(
         images_dir=args.images,
@@ -181,8 +247,7 @@ def snapshotargs(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Training U-Net model for segmentation of brain MRI"
-    )
+        description="Training U-Net model for segmentation of brain MRI")
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -217,7 +282,8 @@ if __name__ == "__main__":
         "--vis-images",
         type=int,
         default=200,
-        help="number of visualization images to save in log file (default: 200)",
+        help=
+        "number of visualization images to save in log file (default: 200)",
     )
     parser.add_argument(
         "--vis-freq",
@@ -225,15 +291,18 @@ if __name__ == "__main__":
         default=10,
         help="frequency of saving images to log file (default: 10)",
     )
-    parser.add_argument(
-        "--weights", type=str, default="./weights", help="folder to save weights"
-    )
-    parser.add_argument(
-        "--logs", type=str, default="./logs", help="folder to save logs"
-    )
-    parser.add_argument(
-        "--images", type=str, default="./data", help="root folder with images"
-    )
+    parser.add_argument("--weights",
+                        type=str,
+                        default="./weights",
+                        help="folder to save weights")
+    parser.add_argument("--logs",
+                        type=str,
+                        default="./logs",
+                        help="folder to save logs")
+    parser.add_argument("--images",
+                        type=str,
+                        default="./data",
+                        help="root folder with images")
     parser.add_argument(
         "--image-size",
         type=int,
@@ -252,5 +321,17 @@ if __name__ == "__main__":
         default=15,
         help="rotation angle range in degrees for augmentation (default: 15)",
     )
+    parser.add_argument('--pretrained',
+                        type=str,
+                        default=None,
+                        help='Path to pretrained ')
+
+    parser.add_argument("--prune-iters",
+                        type=int,
+                        default=2,
+                        help="number of iteration for pruning")
+    parser.add_argument('--grouped_pruning', type=bool, default=True)
+    parser.add_argument('--conv2d_prune_amount', type=float, default=0.4)
+    parser.add_argument('--linear_prune_amount', type=float, default=0.2)
     args = parser.parse_args()
     main(args)
