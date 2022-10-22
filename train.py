@@ -131,10 +131,9 @@ def main(args):
     model = UNet(in_channels=Dataset.in_channels,
                  out_channels=Dataset.out_channels)
     if args.pretrained:
-        model = model.load_state_dict(
+        model.load_state_dict(
             torch.load(args.pretrained, map_location=device))
-    else:
-        model.to(device)
+    model.to(device)
 
     for i in range(args.prune_iters):
         if args.grouped_pruning == True:
@@ -331,8 +330,8 @@ if __name__ == "__main__":
                         type=int,
                         default=2,
                         help="number of iteration for pruning")
-    parser.add_argument('grouped_pruning', type=bool, default=True)
-    parser.add_argument('conv2d_prune_amount', type=float, default=0.4)
-    parser.add_argument('linear_prune_amount', type=float, default=0.2)
+    parser.add_argument('--grouped_pruning', type=bool, default=True)
+    parser.add_argument('--conv2d_prune_amount', type=float, default=0.4)
+    parser.add_argument('--linear_prune_amount', type=float, default=0.2)
     args = parser.parse_args()
     main(args)
