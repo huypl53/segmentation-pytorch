@@ -18,24 +18,12 @@ If you use code or weights shared in this repository, please consider citing:
 }
 ```
 
-## docker
+> Variational dropout integrated
 
-```
-docker build -t brainseg .
-```
-
-```
-nvidia-docker run --rm --shm-size 8G -it -v `pwd`:/workspace brainseg
-```
-
-## PyTorch Hub
-
-Loading model using PyTorch Hub: [pytorch.org/hub/mateuszbuda\_brain-segmentation-pytorch\_unet](https://pytorch.org/hub/mateuszbuda_brain-segmentation-pytorch_unet/)
-
-```python
-import torch
-model = torch.hub.load('mateuszbuda/brain-segmentation-pytorch', 'unet',
-    in_channels=3, out_channels=1, init_features=32, pretrained=True)
+## requirements
+```bash
+pip install --upgrade git+https://github.com/huypl53/cplxmodule.git >> /dev/null
+pip install git+https://github.com/HolyBayes/pytorch_ard >> /dev/null
 ```
 
 ## data

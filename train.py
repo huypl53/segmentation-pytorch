@@ -16,6 +16,7 @@ from torch.nn.utils import prune
 from dataset import BrainSegmentationDataset as Dataset
 from logger import Logger
 from loss import DiceLoss
+from torch_ard import ELBOLoss
 from transform import transforms
 from unet import UNet
 from utils import log_images, dsc, create_classification_report
@@ -26,6 +27,7 @@ def train_model(model, loaders, args, device):
     dsc_loss = DiceLoss()
     best_validation_dsc = 0.0
 
+    elbo_loss = ELBOLoss(model, dsc_loss)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     logger = Logger(args.logs)
@@ -56,23 +58,9 @@ def train_model(model, loaders, args, device):
                 with torch.set_grad_enabled(phase == "train"):
                     y_pred = model(x)
 
-                    loss = dsc_loss(y_pred, y_true)
-                    l1_reg = torch.tensor(0.).to(device)
-                    for module in model.modules():
-                        mask = None
-                        weight = None
-                        for name, buffer in module.named_buffers():
-                            if name == "weight_mask":
-                                mask = buffer
-                        for name, param in module.named_parameters():
-                            if name == "weight_orig":
-                                weight = param
-                        # We usually only want to introduce sparsity to weights and prune weights.
-                        # Do the same for bias if necessary.
-                        if mask is not None and weight is not None:
-                            l1_reg += torch.norm(mask * weight, 1)
+                    # loss = dsc_loss(y_pred, y_true)
+                    loss = elbo_loss(y_pred, y_true, 0.7, 0.3)
 
-                    loss += l1_regularization_strength * l1_reg
 
                     if phase == "valid":
                         loss_valid.append(loss.item())
@@ -104,10 +92,13 @@ def train_model(model, loaders, args, device):
 
             if phase == "valid":
                 log_loss_summary(logger, loss_valid, step, prefix="val_")
-                mean_dsc = np.mean(dsc(
-                    validation_pred,
-                    validation_true,
-                ))
+                if sum([len(validation_pred[i]) for i in range(len(validation_pred))]) > 0:
+                    mean_dsc = np.mean(dsc(
+                        validation_pred,
+                        validation_true,
+                    ))
+                else:
+                    mean_dsc = 0
                 logger.scalar_summary("val_dsc", mean_dsc, step)
                 if mean_dsc > best_validation_dsc:
                     best_validation_dsc = mean_dsc
@@ -251,7 +242,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=16,
+        default=32,
         help="input batch size for training (default: 16)",
     )
     parser.add_argument(
