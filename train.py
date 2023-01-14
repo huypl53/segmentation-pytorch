@@ -1,3 +1,7 @@
+import warnings
+
+warnings.simplefilter("ignore", UserWarning)
+
 import argparse
 import json
 import os
@@ -15,6 +19,9 @@ from transform import transforms
 from unet import UNet
 from utils import log_images, dsc
 
+from bnn import BConfig, prepare_binary_model
+# Import a few examples of quantizers
+from bnn.ops import BasicInputBinarizer, BasicScaleBinarizer, XNORWeightBinarizer
 
 def main(args):
     makedirs(args)
@@ -25,6 +32,19 @@ def main(args):
     loaders = {"train": loader_train, "valid": loader_valid}
 
     unet = UNet(in_channels=Dataset.in_channels, out_channels=Dataset.out_channels)
+
+    # Define the binarization configuration and assign it to the model
+    bconfig = BConfig(
+        activation_pre_process = BasicInputBinarizer,
+        activation_post_process = BasicScaleBinarizer,
+        # optionally, one can pass certain custom variables
+        weight_pre_process = XNORWeightBinarizer.with_args(center_weights=True)
+    )
+    # Convert the model appropiately, propagating the changes from parent node to leafs
+    # The custom_config_layers_name syntax will perform a match based on the layer name, setting a custom quantization function.
+    # unet = prepare_binary_model(unet, bconfig, custom_config_layers_name=['conv1' : BConfig()])
+    unet = prepare_binary_model(unet, bconfig)
+
     unet.to(device)
 
     dsc_loss = DiceLoss()
@@ -37,7 +57,6 @@ def main(args):
     loss_valid = []
 
     step = 0
-    l1_lambda = 1e-3
 
     for epoch in tqdm(range(args.epochs), total=args.epochs):
         for phase in ["train", "valid"]:
@@ -62,8 +81,6 @@ def main(args):
                     y_pred = unet(x)
 
                     loss = dsc_loss(y_pred, y_true)
-                    l1_norm = sum(p.abs().sum() for p in unet.parameters())
-                    loss += l1_lambda*l1_norm
 
                     if phase == "valid":
                         loss_valid.append(loss.item())
@@ -97,9 +114,10 @@ def main(args):
             if phase == "valid":
                 log_loss_summary(logger, loss_valid, step, prefix="val_")
                 mean_dsc = np.mean(
-                    dsc(
+                    dsc_per_volume(
                         validation_pred,
                         validation_true,
+                        loader_valid.dataset.patient_slice_index,
                     )
                 )
                 logger.scalar_summary("val_dsc", mean_dsc, step)
@@ -141,7 +159,9 @@ def datasets(args):
         images_dir=args.images,
         subset="train",
         image_size=args.image_size,
-        transform=transforms(scale=args.aug_scale, angle=args.aug_angle, flip_prob=0.5),
+        transform=transforms(scale=args.aug_scale,
+                             angle=args.aug_angle,
+                             flip_prob=0.5),
     )
     valid = Dataset(
         images_dir=args.images,
@@ -152,16 +172,17 @@ def datasets(args):
     return train, valid
 
 
-# def dsc_per_volume(validation_pred, validation_true, patient_slice_index):
-#     dsc_list = []
-#     num_slices = np.bincount([p[0] for p in patient_slice_index])
-#     index = 0
-#     for p in range(len(num_slices)):
-#         y_pred = np.array(validation_pred[index : index + num_slices[p]])
-#         y_true = np.array(validation_true[index : index + num_slices[p]])
-#         dsc_list.append(dsc(y_pred, y_true))
-#         index += num_slices[p]
-#     return dsc_list
+
+def dsc_per_volume(validation_pred, validation_true, patient_slice_index):
+    dsc_list = []
+    num_slices = np.bincount([p[0] for p in patient_slice_index])
+    index = 0
+    for p in range(len(num_slices)):
+        y_pred = np.array(validation_pred[index : index + num_slices[p]])
+        y_true = np.array(validation_true[index : index + num_slices[p]])
+        dsc_list.append(dsc(y_pred, y_true))
+        index += num_slices[p]
+    return dsc_list
 
 
 def log_loss_summary(logger, loss, step, prefix=""):
@@ -181,12 +202,11 @@ def snapshotargs(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Training U-Net model for segmentation of brain MRI"
-    )
+        description="Training U-Net model for segmentation of brain MRI")
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=16,
+        default=32,
         help="input batch size for training (default: 16)",
     )
     parser.add_argument(
@@ -225,15 +245,18 @@ if __name__ == "__main__":
         default=10,
         help="frequency of saving images to log file (default: 10)",
     )
-    parser.add_argument(
-        "--weights", type=str, default="./weights", help="folder to save weights"
-    )
-    parser.add_argument(
-        "--logs", type=str, default="./logs", help="folder to save logs"
-    )
-    parser.add_argument(
-        "--images", type=str, default="./data", help="root folder with images"
-    )
+    parser.add_argument("--weights",
+                        type=str,
+                        default="./weights-binarizer",
+                        help="folder to save weights")
+    parser.add_argument("--logs",
+                        type=str,
+                        default="./logs-binarizer",
+                        help="folder to save logs")
+    parser.add_argument("--images",
+                        type=str,
+                        default="./data",
+                        help="root folder with images")
     parser.add_argument(
         "--image-size",
         type=int,
