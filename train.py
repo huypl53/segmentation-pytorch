@@ -113,17 +113,19 @@ def main(args):
 
             if phase == "valid":
                 log_loss_summary(logger, loss_valid, step, prefix="val_")
-                mean_dsc = np.mean(
-                    dsc_per_volume(
+                if sum([len(validation_pred[i]) for i in range(len(validation_pred))]) > 0:
+                    mean_dsc = np.mean(dsc(
                         validation_pred,
                         validation_true,
-                        loader_valid.dataset.patient_slice_index,
-                    )
-                )
+                    ))
+                else:
+                    mean_dsc = 0
                 logger.scalar_summary("val_dsc", mean_dsc, step)
                 if mean_dsc > best_validation_dsc:
                     best_validation_dsc = mean_dsc
-                    torch.save(unet.state_dict(), os.path.join(args.weights, "unet.pt"))
+                    torch.save(
+                        unet.state_dict(),
+                        os.path.join(args.weights, f'unet-{best_validation_dsc}.pt'))
                 loss_valid = []
 
     print("Best validation mean DSC: {:4f}".format(best_validation_dsc))
