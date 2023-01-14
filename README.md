@@ -18,24 +18,10 @@ If you use code or weights shared in this repository, please consider citing:
 }
 ```
 
-## docker
+## requirements
 
-```
-docker build -t brainseg .
-```
-
-```
-nvidia-docker run --rm --shm-size 8G -it -v `pwd`:/workspace brainseg
-```
-
-## PyTorch Hub
-
-Loading model using PyTorch Hub: [pytorch.org/hub/mateuszbuda\_brain-segmentation-pytorch\_unet](https://pytorch.org/hub/mateuszbuda_brain-segmentation-pytorch_unet/)
-
-```python
-import torch
-model = torch.hub.load('mateuszbuda/brain-segmentation-pytorch', 'unet',
-    in_channels=3, out_channels=1, init_features=32, pretrained=True)
+```bash
+pip install torch-pruning
 ```
 
 ## data
@@ -53,13 +39,13 @@ A segmentation model implemented in this repository is U-Net as described in [As
 
 ## results
 
-|![TCGA_DU_6404_19850629](./assets/TCGA_DU_6404_19850629.gif)|![TCGA_HT_7879_19981009](./assets/TCGA_HT_7879_19981009.gif)|![TCGA_CS_4944_20010208](./assets/TCGA_CS_4944_20010208.gif)|
-|:-------:|:-------:|:-------:|
-| 94% DSC | 91% DSC | 89% DSC |
+| ![TCGA_DU_6404_19850629](./assets/TCGA_DU_6404_19850629.gif) | ![TCGA_HT_7879_19981009](./assets/TCGA_HT_7879_19981009.gif) | ![TCGA_CS_4944_20010208](./assets/TCGA_CS_4944_20010208.gif) |
+| :----------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------------------------: |
+|                           94% DSC                            |                           91% DSC                            |                           89% DSC                            |
 
 Qualitative results for validation cases from three different institutions with DSC of 94%, 91%, and 89%.
 Green outlines correspond to ground truth and red to model predictions.
-Images show FLAIR modality after preprocessing. 
+Images show FLAIR modality after preprocessing.
 
 ![dsc](./assets/dsc.png)
 
