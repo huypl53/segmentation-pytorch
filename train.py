@@ -32,6 +32,7 @@ def train_model(model, loaders, args, device):
     loss_train = []
     loss_valid = []
 
+    model_int8 = None
     step = 0
     l1_regularization_strength = 1e-3
     for epoch in tqdm(range(args.epochs), total=args.epochs):
@@ -54,7 +55,12 @@ def train_model(model, loaders, args, device):
                 optimizer.zero_grad()
 
                 with torch.set_grad_enabled(phase == "train"):
-                    y_pred = model(x)
+                    model_int8 = torch.quantization.quantize_dynamic(
+                        model,  # the original model
+                        {torch.nn.Linear},  # a set of layers to dynamically quantize
+                        dtype=torch.qint8)  # the target dtype for quantized weights
+
+                    y_pred = model_int8(x)
 
                     loss = dsc_loss(y_pred, y_true)
 
@@ -87,6 +93,8 @@ def train_model(model, loaders, args, device):
                     loss_train = []
 
             if phase == "valid":
+
+    
                 log_loss_summary(logger, loss_valid, step, prefix="val_")
                 mean_dsc = np.mean(dsc(
                     validation_pred,
@@ -96,11 +104,15 @@ def train_model(model, loaders, args, device):
                 if mean_dsc > best_validation_dsc:
                     best_validation_dsc = mean_dsc
                     torch.save(
-                        model.state_dict(),
+                        model_int8.state_dict(),
                         os.path.join(args.weights,
-                                     f'unet-{best_validation_dsc}.pt'))
+                                    f'unet-int8-{best_validation_dsc}.pt'))
+                    
                 loss_valid = []
+    size = os.path.getsize(os.path.join(args.weights,
+                                    f'unet-int8-{best_validation_dsc}.pt'))
     print("Best validation mean DSC: {:4f}".format(best_validation_dsc))
+    print(f'Int8 model size: ${size/1e3} KB')
 
 
 def main(args):
@@ -117,46 +129,13 @@ def main(args):
     if args.pretrained:
         model.load_state_dict(
             torch.load(args.pretrained, map_location=device))
+    
+    torch.save(model.state_dict(), '/tmp/float-unet.pt')
+    size = os.path.getsize('/tmp/float-unet.pt')
+    print(f'Float model size: ${size/1e3} KB')
     model.to(device)
 
-    for i in range(args.prune_iters):
-        if args.grouped_pruning == True:
-            parameters_to_prune = []
-            for module_name, module in model.named_modules():
-                if isinstance(module, torch.nn.Conv2d):
-                    parameters_to_prune.append((module, "weight"))
-            prune.global_unstructured(
-                parameters_to_prune,
-                pruning_method=prune.L1Unstructured,
-                amount=args.conv2d_prune_amount,
-            )
-        else:
-            for module_name, module in model.named_modules():
-                if isinstance(module, torch.nn.Conv2d):
-                    prune.l1_unstructured(module,
-                                          name="weight",
-                                          amount=args.conv2d_prune_amount)
-                elif isinstance(module, torch.nn.Linear):
-                    prune.l1_unstructured(module,
-                                          name="weight",
-                                          amount=args.linear_prune_amount)
-        num_zeros, num_elements, sparsity = measure_global_sparsity(
-            model,
-            weight=True,
-            bias=False,
-            conv2d_use_mask=True,
-            linear_use_mask=False)
-
-        print(f'Model sparsity after {i} iter: {sparsity}')
-        train_model(model, loaders, args, device)
-
-    num_zeros, num_elements, sparsity = measure_global_sparsity(
-        model,
-        weight=True,
-        bias=False,
-        conv2d_use_mask=True,
-        linear_use_mask=False)
-    print(f'Model sparsity at last: {sparsity}')
+    train_model(model, loaders, args, device)
 
 
 def data_loaders(args):
@@ -310,12 +289,5 @@ if __name__ == "__main__":
                         default=None,
                         help='Path to pretrained ')
 
-    parser.add_argument("--prune-iters",
-                        type=int,
-                        default=2,
-                        help="number of iteration for pruning")
-    parser.add_argument('--grouped_pruning', type=bool, default=True)
-    parser.add_argument('--conv2d_prune_amount', type=float, default=0.4)
-    parser.add_argument('--linear_prune_amount', type=float, default=0.2)
     args = parser.parse_args()
     main(args)
