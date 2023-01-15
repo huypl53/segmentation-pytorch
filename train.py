@@ -57,22 +57,6 @@ def train_model(model, loaders, args, device):
                     y_pred = model(x)
 
                     loss = dsc_loss(y_pred, y_true)
-                    l1_reg = torch.tensor(0.).to(device)
-                    for module in model.modules():
-                        mask = None
-                        weight = None
-                        for name, buffer in module.named_buffers():
-                            if name == "weight_mask":
-                                mask = buffer
-                        for name, param in module.named_parameters():
-                            if name == "weight_orig":
-                                weight = param
-                        # We usually only want to introduce sparsity to weights and prune weights.
-                        # Do the same for bias if necessary.
-                        if mask is not None and weight is not None:
-                            l1_reg += torch.norm(mask * weight, 1)
-
-                    loss += l1_regularization_strength * l1_reg
 
                     if phase == "valid":
                         loss_valid.append(loss.item())
