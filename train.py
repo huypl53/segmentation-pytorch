@@ -57,7 +57,7 @@ def train_model(model, loaders, args, device):
                 with torch.set_grad_enabled(phase == "train"):
                     model_int8 = torch.quantization.quantize_dynamic(
                         model,  # the original model
-                        {torch.nn.Linear},  # a set of layers to dynamically quantize
+                        {torch.nn.Conv2d, torch.nn.ConvTranspose2d},  # a set of layers to dynamically quantize
                         dtype=torch.qint8)  # the target dtype for quantized weights
 
                     y_pred = model_int8(x)
