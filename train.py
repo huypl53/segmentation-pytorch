@@ -32,21 +32,28 @@ def main(args):
     loaders = {"train": loader_train, "valid": loader_valid}
 
     image_size = args.image_size
-    example_inputs = torch.randn(1, 3, image_size, image_size)
+    example_inputs = torch.randn(1, 3, image_size, image_size).to(device)
+
+    unet = UNet(in_channels=Dataset.in_channels, out_channels=Dataset.out_channels)
+
+    unet.to(device)
 
     # 0. importance criterion for parameter selections
     imp = tp.importance.MagnitudeImportance(p=2, group_reduction='mean')
     
     # 1. ignore some layers that should not be pruned, e.g., the final classifier layer.
     ignored_layers = []
-    # for m in model.modules():
-    #     if isinstance(m, torch.nn.Linear) and m.out_features == 1000:
-    #         ignored_layers.append(m) # DO NOT prune the final classifier!
+    ignore_names = [
+        'dec', 'bottleneck'
+    ]
+    for m in unet.named_modules():
+        # if isinstance(m, torch.nn.Linear) and m.out_features == 1000:
+        #     ignored_layers.append(m) # DO NOT prune the final classifier!
+        for name in ignore_names:
+            if name in m[0]:
+                ignored_layers.append(m[1])
 
 
-    unet = UNet(in_channels=Dataset.in_channels, out_channels=Dataset.out_channels)
-
-    unet.to(device)
 
     # 2. Pruner initialization
     prune_iters = args.prune_iters # You can prune your model to the target sparsity iteratively.
