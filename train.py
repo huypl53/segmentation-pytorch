@@ -32,15 +32,18 @@ def train_model(model, loaders, args, device):
     loss_train = []
     loss_valid = []
 
-    model_int8 = None
+    model_eval = None
     step = 0
     l1_regularization_strength = 1e-3
+
+
     for epoch in tqdm(range(args.epochs), total=args.epochs):
         for phase in ["train", "valid"]:
             if phase == "train":
                 model.train()
             else:
-                model.eval()
+                model_eval = torch.ao.quantization.convert(model.eval(), inplace=False)
+                model_eval.eval()
 
             validation_pred = []
             validation_true = []
@@ -54,34 +57,28 @@ def train_model(model, loaders, args, device):
 
                 optimizer.zero_grad()
 
-                with torch.set_grad_enabled(phase == "train"):
-                    model_int8 = torch.quantization.quantize_dynamic(
-                        model,  # the original model
-                        {torch.nn.Conv2d, torch.nn.ConvTranspose2d},  # a set of layers to dynamically quantize
-                        dtype=torch.qint8)  # the target dtype for quantized weights
+                y_pred = model(x)
 
-                    y_pred = model_int8(x)
+                loss = dsc_loss(y_pred, y_true)
 
-                    loss = dsc_loss(y_pred, y_true)
-
-                    if phase == "valid":
-                        loss_valid.append(loss.item())
-                        y_pred_np = y_pred.detach().cpu().numpy()
-                        validation_pred.extend(
-                            [y_pred_np[s] for s in range(y_pred_np.shape[0])])
-                        y_true_np = y_true.detach().cpu().numpy()
-                        validation_true.extend(
-                            [y_true_np[s] for s in range(y_true_np.shape[0])])
-                        if (epoch % args.vis_freq
-                                == 0) or (epoch == args.epochs - 1):
-                            if i * args.batch_size < args.vis_images:
-                                tag = "image/{}".format(i)
-                                num_images = args.vis_images - i * args.batch_size
-                                logger.image_list_summary(
-                                    tag,
-                                    log_images(x, y_true, y_pred)[:num_images],
-                                    step,
-                                )
+                if phase == "valid":
+                    loss_valid.append(loss.item())
+                    y_pred_np = y_pred.detach().cpu().numpy()
+                    validation_pred.extend(
+                        [y_pred_np[s] for s in range(y_pred_np.shape[0])])
+                    y_true_np = y_true.detach().cpu().numpy()
+                    validation_true.extend(
+                        [y_true_np[s] for s in range(y_true_np.shape[0])])
+                    if (epoch % args.vis_freq
+                            == 0) or (epoch == args.epochs - 1):
+                        if i * args.batch_size < args.vis_images:
+                            tag = "image/{}".format(i)
+                            num_images = args.vis_images - i * args.batch_size
+                            logger.image_list_summary(
+                                tag,
+                                log_images(x, y_true, y_pred)[:num_images],
+                                step,
+                            )
 
                     if phase == "train":
                         loss_train.append(loss.item())
@@ -92,6 +89,13 @@ def train_model(model, loaders, args, device):
                     log_loss_summary(logger, loss_train, step)
                     loss_train = []
 
+            if epoch > args.epochs/100*75:
+                # Freeze quantizer parameters
+                qat_model.apply(torch.ao.quantization.disable_observer)
+            if epoch > args.epochs/100*50:
+                # Freeze batch norm mean and variance estimates
+                qat_model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                
             if phase == "valid":
 
     
@@ -104,7 +108,7 @@ def train_model(model, loaders, args, device):
                 if mean_dsc > best_validation_dsc:
                     best_validation_dsc = mean_dsc
                     torch.save(
-                        model_int8.state_dict(),
+                        model.state_dict(),
                         os.path.join(args.weights,
                                     f'unet-int8-{best_validation_dsc}.pt'))
                     
@@ -134,6 +138,10 @@ def main(args):
     size = os.path.getsize('/tmp/float-unet.pt')
     print(f'Float model size: ${size/1e3} KB')
     model.to(device)
+
+    model.fuse_model()
+    model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
+    torch.ao.quantization.prepare_qat(model.train(), inplace=True)
 
     train_model(model, loaders, args, device)
 

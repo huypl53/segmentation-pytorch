@@ -96,3 +96,20 @@ class UNet(nn.Module):
                 ]
             )
         )
+
+    def fuse_model(self):
+        # for m in self.modules():
+        #     if type(m) == nn.Conv2d:
+        #         torch.ao.quantization.fuse_modules(m, ['0', '1', '2'], inplace=True)
+
+
+        for i, m in enumerate(model.modules()):
+            if type(m) == nn.Sequential:
+                # print( '*'*20, i, '*'*20)
+                # print(m)
+                list_modules = []
+                for n, m in m.named_modules():
+                    # print('---', n, m, '---')
+                    if type(m) == nn.Conv2d:
+                        list_modules.append(n)
+                torch.ao.quantization.fuse_modules(m, list_modules, inplace=True)
