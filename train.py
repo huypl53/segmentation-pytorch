@@ -42,7 +42,7 @@ def train_model(model, loaders, args, device):
             if phase == "train":
                 model.train()
             else:
-                model_eval = torch.ao.quantization.convert(model.eval(), inplace=False)
+                model_eval = torch.ao.quantization.convert(model.to('cpu').eval(), inplace=False)
                 model_eval.eval()
 
             validation_pred = []
@@ -54,10 +54,11 @@ def train_model(model, loaders, args, device):
 
                 x, y_true = data
                 x, y_true = x.to(device), y_true.to(device)
+                # x, y_true = (x.to(device), y_true.to(device)) if phase == 'train' else (x.to('cpu'), y_true.to('cpu'))
 
                 optimizer.zero_grad()
 
-                y_pred = model(x)
+                y_pred = model(x) if phase == 'train' else model_eval(x)
 
                 loss = dsc_loss(y_pred, y_true)
 
@@ -80,10 +81,10 @@ def train_model(model, loaders, args, device):
                                 step,
                             )
 
-                    if phase == "train":
-                        loss_train.append(loss.item())
-                        loss.backward()
-                        optimizer.step()
+                if phase == "train":
+                    loss_train.append(loss.item())
+                    loss.backward()
+                    optimizer.step()
 
                 if phase == "train" and (step + 1) % 10 == 0:
                     log_loss_summary(logger, loss_train, step)
@@ -91,14 +92,12 @@ def train_model(model, loaders, args, device):
 
             if epoch > args.epochs/100*75:
                 # Freeze quantizer parameters
-                qat_model.apply(torch.ao.quantization.disable_observer)
+                model.apply(torch.ao.quantization.disable_observer)
             if epoch > args.epochs/100*50:
                 # Freeze batch norm mean and variance estimates
-                qat_model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
                 
             if phase == "valid":
-
-    
                 log_loss_summary(logger, loss_valid, step, prefix="val_")
                 mean_dsc = np.mean(dsc(
                     validation_pred,
@@ -139,6 +138,7 @@ def main(args):
     print(f'Float model size: ${size/1e3} KB')
     model.to(device)
 
+    model.eval()
     model.fuse_model()
     model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
     torch.ao.quantization.prepare_qat(model.train(), inplace=True)

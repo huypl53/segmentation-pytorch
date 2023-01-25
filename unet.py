@@ -2,6 +2,7 @@ from collections import OrderedDict
 
 import torch
 import torch.nn as nn
+from itertools import islice
 
 
 class UNet(nn.Module):
@@ -102,14 +103,18 @@ class UNet(nn.Module):
         #     if type(m) == nn.Conv2d:
         #         torch.ao.quantization.fuse_modules(m, ['0', '1', '2'], inplace=True)
 
-
-        for i, m in enumerate(model.modules()):
-            if type(m) == nn.Sequential:
+        for i, root_m in enumerate(self.modules()):
+            if type(root_m) == nn.Sequential:
                 # print( '*'*20, i, '*'*20)
                 # print(m)
-                list_modules = []
-                for n, m in m.named_modules():
-                    # print('---', n, m, '---')
-                    if type(m) == nn.Conv2d:
-                        list_modules.append(n)
-                torch.ao.quantization.fuse_modules(m, list_modules, inplace=True)
+                # list_modules = []
+                # for n, m in root_m.named_modules():
+                #     # print('---', n, m, '---')
+                #     if type(m) == nn.Conv2d:
+                #         list_modules.append(n)
+                # torch.ao.quantization.fuse_modules(root_m, list_modules, inplace=True)
+                bname = next(islice(iter(root_m.named_modules()), 1, 2))[0].split('conv')[0]
+                
+                list_modules = [[ bname+n+i for n in ['conv', 'norm', 'relu']]  for i in ['1', '2']]
+                # print('list modules: ', list_modules)
+                torch.ao.quantization.fuse_modules(root_m, list_modules, inplace=True)
