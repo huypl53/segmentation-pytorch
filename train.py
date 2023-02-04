@@ -13,7 +13,7 @@ from logger import Logger
 from loss import DiceLoss
 from transform import transforms
 from unet import UNet
-from utils import log_images, dsc
+from utils import log_images, dsc, iou
 
 
 def main(args):
@@ -29,6 +29,7 @@ def main(args):
 
     dsc_loss = DiceLoss()
     best_validation_dsc = 0.0
+    best_validation_iou = 0.0
 
     optimizer = optim.Adam(unet.parameters(), lr=args.lr)
 
@@ -102,14 +103,24 @@ def main(args):
                         validation_true,
                     )
                 )
+
+                mean_iou = np.mean(
+                    iou(
+                        validation_pred,
+                        validation_true,
+                    )
+                )
                 logger.scalar_summary("val_dsc", mean_dsc, step)
+                if mean_iou > best_validation_iou:
+                    best_validation_iou = mean_iou
+
                 if mean_dsc > best_validation_dsc:
                     best_validation_dsc = mean_dsc
-                    torch.save(unet.state_dict(), os.path.join(args.weights, "unet.pt"))
+                    torch.save(unet.state_dict(), os.path.join(args.weights, f'unet-{best_validation_dsc}-{best_validation_iou}.pt'))
                 loss_valid = []
 
     print("Best validation mean DSC: {:4f}".format(best_validation_dsc))
-
+    print("Best validation mean IOU: {:4f}".format(best_validation_iou))
 
 def data_loaders(args):
     dataset_train, dataset_valid = datasets(args)
