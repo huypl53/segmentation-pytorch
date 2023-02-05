@@ -124,7 +124,7 @@ def train_model(model, loaders, args, device):
 
                 if mean_dsc > best_validation_dsc:
                     best_validation_dsc = mean_dsc
-                    torch.save(unet.state_dict(), os.path.join(args.weights, f'unet-{best_validation_dsc}-{best_validation_iou}.pt'))
+                    torch.save(model.state_dict(), os.path.join(args.weights, f'unet-{best_validation_dsc}-{best_validation_iou}.pt'))
                 loss_valid = []
     print("Best validation mean DSC: {:4f}".format(best_validation_dsc))
     print("Best validation mean IOU: {:4f}".format(best_validation_iou))
