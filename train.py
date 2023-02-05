@@ -19,7 +19,6 @@ from loss import DiceLoss
 from transform import transforms
 from unet import UNet
 from utils import log_images, dsc, iou
-from prune import measure_global_sparsity
 
 
 def train_model(model, loaders, args, device):
@@ -34,7 +33,6 @@ def train_model(model, loaders, args, device):
     loss_valid = []
 
     step = 0
-    l1_regularization_strength = 1e-3
     for epoch in tqdm(range(args.epochs), total=args.epochs):
         for phase in ["train", "valid"]:
             if phase == "train":
@@ -58,22 +56,6 @@ def train_model(model, loaders, args, device):
                     y_pred = model(x)
 
                     loss = dsc_loss(y_pred, y_true)
-                    l1_reg = torch.tensor(0.).to(device)
-                    for module in model.modules():
-                        mask = None
-                        weight = None
-                        for name, buffer in module.named_buffers():
-                            if name == "weight_mask":
-                                mask = buffer
-                        for name, param in module.named_parameters():
-                            if name == "weight_orig":
-                                weight = param
-                        # We usually only want to introduce sparsity to weights and prune weights.
-                        # Do the same for bias if necessary.
-                        if mask is not None and weight is not None:
-                            l1_reg += torch.norm(mask * weight, 1)
-
-                    loss += l1_regularization_strength * l1_reg
 
                     if phase == "valid":
                         loss_valid.append(loss.item())
@@ -119,12 +101,14 @@ def train_model(model, loaders, args, device):
                     )
                 )
                 logger.scalar_summary("val_dsc", mean_dsc, step)
+                logger.scalar_summary("val_iou", mean_iou, step)
+
                 if mean_iou > best_validation_iou:
                     best_validation_iou = mean_iou
 
                 if mean_dsc > best_validation_dsc:
                     best_validation_dsc = mean_dsc
-                    torch.save(unet.state_dict(), os.path.join(args.weights, f'unet-{best_validation_dsc}-{best_validation_iou}.pt'))
+                    torch.save(model.state_dict(), os.path.join(args.weights, f'unet-{best_validation_dsc}-{best_validation_iou}.pt'))
                 loss_valid = []
     print("Best validation mean DSC: {:4f}".format(best_validation_dsc))
     print("Best validation mean IOU: {:4f}".format(best_validation_iou))
@@ -145,45 +129,7 @@ def main(args):
             torch.load(args.pretrained, map_location=device))
     model.to(device)
 
-    for i in range(args.prune_iters):
-        if args.grouped_pruning == True:
-            parameters_to_prune = []
-            for module_name, module in model.named_modules():
-                if isinstance(module, torch.nn.Conv2d):
-                    parameters_to_prune.append((module, "weight"))
-            prune.global_unstructured(
-                parameters_to_prune,
-                pruning_method=prune.L1Unstructured,
-                amount=args.conv2d_prune_amount,
-            )
-        else:
-            for module_name, module in model.named_modules():
-                if isinstance(module, torch.nn.Conv2d):
-                    prune.l1_unstructured(module,
-                                          name="weight",
-                                          amount=args.conv2d_prune_amount)
-                elif isinstance(module, torch.nn.Linear):
-                    prune.l1_unstructured(module,
-                                          name="weight",
-                                          amount=args.linear_prune_amount)
-        num_zeros, num_elements, sparsity = measure_global_sparsity(
-            model,
-            weight=True,
-            bias=False,
-            conv2d_use_mask=True,
-            linear_use_mask=False)
-
-        print(f'Model sparsity after {i} iter: {sparsity}')
-        train_model(model, loaders, args, device)
-
-    num_zeros, num_elements, sparsity = measure_global_sparsity(
-        model,
-        weight=True,
-        bias=False,
-        conv2d_use_mask=True,
-        linear_use_mask=False)
-    print(f'Model sparsity at last: {sparsity}')
-
+    train_model(model, loaders, args, device)
 
 def data_loaders(args):
     dataset_train, dataset_valid = datasets(args)
@@ -208,7 +154,6 @@ def data_loaders(args):
     )
 
     return loader_train, loader_valid
-
 
 def datasets(args):
     train = Dataset(
@@ -336,12 +281,5 @@ if __name__ == "__main__":
                         default=None,
                         help='Path to pretrained ')
 
-    parser.add_argument("--prune-iters",
-                        type=int,
-                        default=2,
-                        help="number of iteration for pruning")
-    parser.add_argument('--grouped_pruning', type=bool, default=True)
-    parser.add_argument('--conv2d_prune_amount', type=float, default=0.4)
-    parser.add_argument('--linear_prune_amount', type=float, default=0.2)
     args = parser.parse_args()
     main(args)
