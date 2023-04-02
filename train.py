@@ -1,7 +1,7 @@
 import warnings
 
 warnings.simplefilter("ignore", UserWarning)
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 import torch_pruning as tp
 
@@ -39,13 +39,11 @@ def main(args):
     unet.to(device)
 
     # 0. importance criterion for parameter selections
-    imp = tp.importance.MagnitudeImportance(p=2, group_reduction='mean')
-    
+    imp = tp.importance.MagnitudeImportance(p=2, group_reduction="mean")
+
     # 1. ignore some layers that should not be pruned, e.g., the final classifier layer.
     ignored_layers = []
-    ignore_names = [
-        'dec', 'bottleneck'
-    ]
+    ignore_names = ["dec", "bottleneck"]
     for m in unet.named_modules():
         # if isinstance(m, torch.nn.Linear) and m.out_features == 1000:
         #     ignored_layers.append(m) # DO NOT prune the final classifier!
@@ -53,17 +51,17 @@ def main(args):
             if name in m[0]:
                 ignored_layers.append(m[1])
 
-
-
     # 2. Pruner initialization
-    prune_iters = args.prune_iters # You can prune your model to the target sparsity iteratively.
+    prune_iters = (
+        args.prune_iters
+    )  # You can prune your model to the target sparsity iteratively.
     pruner = tp.pruner.MagnitudePruner(
-        unet, 
-        example_inputs, 
-        global_pruning=False, # If False, a uniform sparsity will be assigned to different layers.
-        importance=imp, # importance criterion for parameter selection
-        iterative_steps=prune_iters, # the number of iterations to achieve target sparsity
-        ch_sparsity=args.channel_sparsity, # remove 50% channels, ResNet18 = {64, 128, 256, 512} => ResNet18_Half = {32, 64, 128, 256}
+        unet,
+        example_inputs,
+        global_pruning=False,  # If False, a uniform sparsity will be assigned to different layers.
+        importance=imp,  # importance criterion for parameter selection
+        iterative_steps=prune_iters,  # the number of iterations to achieve target sparsity
+        ch_sparsity=args.channel_sparsity,  # remove 50% channels, ResNet18 = {64, 128, 256, 512} => ResNet18_Half = {32, 64, 128, 256}
         ignored_layers=ignored_layers,
     )
 
@@ -82,20 +80,19 @@ def main(args):
     for i in range(prune_iters):
         # 3. the pruner.step will remove some channels from the unet with least importance
         pruner.step()
-        
+
         # 4. Do whatever you like here, such as fintuning
         macs, nparams = tp.utils.count_ops_and_params(unet, example_inputs)
         # print(unet)
         print(unet(example_inputs).shape)
         print(
             "  Iter %d/%d, Params: %.2f M => %.2f M"
-            % (i+1, prune_iters, base_nparams / 1e6, nparams / 1e6)
+            % (i + 1, prune_iters, base_nparams / 1e6, nparams / 1e6)
         )
         print(
             "  Iter %d/%d, MACs: %.2f G => %.2f G"
-            % (i+1, prune_iters, base_macs / 1e9, macs / 1e9)
+            % (i + 1, prune_iters, base_macs / 1e9, macs / 1e9)
         )
-
 
         for epoch in tqdm(range(args.epochs), total=args.epochs):
             for phase in ["train", "valid"]:
@@ -131,7 +128,9 @@ def main(args):
                             validation_true.extend(
                                 [y_true_np[s] for s in range(y_true_np.shape[0])]
                             )
-                            if (epoch % args.vis_freq == 0) or (epoch == args.epochs - 1):
+                            if (epoch % args.vis_freq == 0) or (
+                                epoch == args.epochs - 1
+                            ):
                                 if i * args.batch_size < args.vis_images:
                                     tag = "image/{}".format(i)
                                     num_images = args.vis_images - i * args.batch_size
@@ -152,19 +151,33 @@ def main(args):
 
                 if phase == "valid":
                     log_loss_summary(logger, loss_valid, step, prefix="val_")
-                    if sum([len(validation_pred[i]) for i in range(len(validation_pred))]) > 0:
-                        mean_dsc = np.mean(dsc(
-                            validation_pred,
-                            validation_true,
-                        ))
+                    if (
+                        sum(
+                            [
+                                len(validation_pred[i])
+                                for i in range(len(validation_pred))
+                            ]
+                        )
+                        > 0
+                    ):
+                        mean_dsc = np.mean(
+                            dsc(
+                                validation_pred,
+                                validation_true,
+                            )
+                        )
                     else:
                         mean_dsc = 0
                     logger.scalar_summary("val_dsc", mean_dsc, step)
                     if mean_dsc > best_validation_dsc:
                         best_validation_dsc = mean_dsc
                         torch.save(
-                            unet.state_dict(),
-                            os.path.join(args.weights, f'unet-{best_validation_dsc}.pt'))
+                            # unet.state_dict(),
+                            unet,
+                            os.path.join(
+                                args.weights, f"unet-{best_validation_dsc}-entire.pt"
+                            ),
+                        )
                     loss_valid = []
 
     print("Best validation mean DSC: {:4f}".format(best_validation_dsc))
@@ -200,9 +213,7 @@ def datasets(args):
         images_dir=args.images,
         subset="train",
         image_size=args.image_size,
-        transform=transforms(scale=args.aug_scale,
-                             angle=args.aug_angle,
-                             flip_prob=0.5),
+        transform=transforms(scale=args.aug_scale, angle=args.aug_angle, flip_prob=0.5),
     )
     valid = Dataset(
         images_dir=args.images,
@@ -211,7 +222,6 @@ def datasets(args):
         random_sampling=False,
     )
     return train, valid
-
 
 
 def dsc_per_volume(validation_pred, validation_true, patient_slice_index):
@@ -243,7 +253,8 @@ def snapshotargs(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Training U-Net model for segmentation of brain MRI")
+        description="Training U-Net model for segmentation of brain MRI"
+    )
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -286,18 +297,18 @@ if __name__ == "__main__":
         default=10,
         help="frequency of saving images to log file (default: 10)",
     )
-    parser.add_argument("--weights",
-                        type=str,
-                        default="./weights-binarizer",
-                        help="folder to save weights")
-    parser.add_argument("--logs",
-                        type=str,
-                        default="./logs-binarizer",
-                        help="folder to save logs")
-    parser.add_argument("--images",
-                        type=str,
-                        default="./data",
-                        help="root folder with images")
+    parser.add_argument(
+        "--weights",
+        type=str,
+        default="./weights-binarizer",
+        help="folder to save weights",
+    )
+    parser.add_argument(
+        "--logs", type=str, default="./logs-binarizer", help="folder to save logs"
+    )
+    parser.add_argument(
+        "--images", type=str, default="./data", help="root folder with images"
+    )
     parser.add_argument(
         "--image-size",
         type=int,
