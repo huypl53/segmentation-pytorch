@@ -61,17 +61,17 @@ def train_model(model, loaders, args, device):
                     # loss = dsc_loss(y_pred, y_true)
                     loss = elbo_loss(y_pred, y_true, 0.7, 0.3)
 
-
                     if phase == "valid":
                         loss_valid.append(loss.item())
                         y_pred_np = y_pred.detach().cpu().numpy()
                         validation_pred.extend(
-                            [y_pred_np[s] for s in range(y_pred_np.shape[0])])
+                            [y_pred_np[s] for s in range(y_pred_np.shape[0])]
+                        )
                         y_true_np = y_true.detach().cpu().numpy()
                         validation_true.extend(
-                            [y_true_np[s] for s in range(y_true_np.shape[0])])
-                        if (epoch % args.vis_freq
-                                == 0) or (epoch == args.epochs - 1):
+                            [y_true_np[s] for s in range(y_true_np.shape[0])]
+                        )
+                        if (epoch % args.vis_freq == 0) or (epoch == args.epochs - 1):
                             if i * args.batch_size < args.vis_images:
                                 tag = "image/{}".format(i)
                                 num_images = args.vis_images - i * args.batch_size
@@ -92,11 +92,16 @@ def train_model(model, loaders, args, device):
 
             if phase == "valid":
                 log_loss_summary(logger, loss_valid, step, prefix="val_")
-                if sum([len(validation_pred[i]) for i in range(len(validation_pred))]) > 0:
-                    mean_dsc = np.mean(dsc(
-                        validation_pred,
-                        validation_true,
-                    ))
+                if (
+                    sum([len(validation_pred[i]) for i in range(len(validation_pred))])
+                    > 0
+                ):
+                    mean_dsc = np.mean(
+                        dsc(
+                            validation_pred,
+                            validation_true,
+                        )
+                    )
                 else:
                     mean_dsc = 0
                 logger.scalar_summary("val_dsc", mean_dsc, step)
@@ -104,8 +109,15 @@ def train_model(model, loaders, args, device):
                     best_validation_dsc = mean_dsc
                     torch.save(
                         model.state_dict(),
-                        os.path.join(args.weights,
-                                     f'unet-{best_validation_dsc}.pt'))
+                        os.path.join(args.weights, f"unet-{best_validation_dsc}.pt"),
+                    )
+
+                    torch.save(
+                        model,
+                        os.path.join(
+                            args.weights, f"unet-{best_validation_dsc}-entire.pt"
+                        ),
+                    )
                 loss_valid = []
     print("Best validation mean DSC: {:4f}".format(best_validation_dsc))
 
@@ -113,17 +125,14 @@ def train_model(model, loaders, args, device):
 def main(args):
     makedirs(args)
     snapshotargs(args)
-    device = torch.device(
-        "cpu" if not torch.cuda.is_available() else args.device)
+    device = torch.device("cpu" if not torch.cuda.is_available() else args.device)
 
     loader_train, loader_valid = data_loaders(args)
     loaders = {"train": loader_train, "valid": loader_valid}
 
-    model = UNet(in_channels=Dataset.in_channels,
-                 out_channels=Dataset.out_channels)
+    model = UNet(in_channels=Dataset.in_channels, out_channels=Dataset.out_channels)
     if args.pretrained:
-        model.load_state_dict(
-            torch.load(args.pretrained, map_location=device))
+        model.load_state_dict(torch.load(args.pretrained, map_location=device))
     model.to(device)
 
     for i in range(args.prune_iters):
@@ -140,30 +149,24 @@ def main(args):
         else:
             for module_name, module in model.named_modules():
                 if isinstance(module, torch.nn.Conv2d):
-                    prune.l1_unstructured(module,
-                                          name="weight",
-                                          amount=args.conv2d_prune_amount)
+                    prune.l1_unstructured(
+                        module, name="weight", amount=args.conv2d_prune_amount
+                    )
                 elif isinstance(module, torch.nn.Linear):
-                    prune.l1_unstructured(module,
-                                          name="weight",
-                                          amount=args.linear_prune_amount)
+                    prune.l1_unstructured(
+                        module, name="weight", amount=args.linear_prune_amount
+                    )
         num_zeros, num_elements, sparsity = measure_global_sparsity(
-            model,
-            weight=True,
-            bias=False,
-            conv2d_use_mask=True,
-            linear_use_mask=False)
+            model, weight=True, bias=False, conv2d_use_mask=True, linear_use_mask=False
+        )
 
-        print(f'Model sparsity after {i} iter: {sparsity}')
+        print(f"Model sparsity after {i} iter: {sparsity}")
         train_model(model, loaders, args, device)
 
     num_zeros, num_elements, sparsity = measure_global_sparsity(
-        model,
-        weight=True,
-        bias=False,
-        conv2d_use_mask=True,
-        linear_use_mask=False)
-    print(f'Model sparsity at last: {sparsity}')
+        model, weight=True, bias=False, conv2d_use_mask=True, linear_use_mask=False
+    )
+    print(f"Model sparsity at last: {sparsity}")
 
 
 def data_loaders(args):
@@ -196,9 +199,7 @@ def datasets(args):
         images_dir=args.images,
         subset="train",
         image_size=args.image_size,
-        transform=transforms(scale=args.aug_scale,
-                             angle=args.aug_angle,
-                             flip_prob=0.5),
+        transform=transforms(scale=args.aug_scale, angle=args.aug_angle, flip_prob=0.5),
     )
     valid = Dataset(
         images_dir=args.images,
@@ -238,7 +239,8 @@ def snapshotargs(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Training U-Net model for segmentation of brain MRI")
+        description="Training U-Net model for segmentation of brain MRI"
+    )
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -273,8 +275,7 @@ if __name__ == "__main__":
         "--vis-images",
         type=int,
         default=200,
-        help=
-        "number of visualization images to save in log file (default: 200)",
+        help="number of visualization images to save in log file (default: 200)",
     )
     parser.add_argument(
         "--vis-freq",
@@ -282,18 +283,15 @@ if __name__ == "__main__":
         default=10,
         help="frequency of saving images to log file (default: 10)",
     )
-    parser.add_argument("--weights",
-                        type=str,
-                        default="./weights",
-                        help="folder to save weights")
-    parser.add_argument("--logs",
-                        type=str,
-                        default="./logs",
-                        help="folder to save logs")
-    parser.add_argument("--images",
-                        type=str,
-                        default="./data",
-                        help="root folder with images")
+    parser.add_argument(
+        "--weights", type=str, default="./weights", help="folder to save weights"
+    )
+    parser.add_argument(
+        "--logs", type=str, default="./logs", help="folder to save logs"
+    )
+    parser.add_argument(
+        "--images", type=str, default="./data", help="root folder with images"
+    )
     parser.add_argument(
         "--image-size",
         type=int,
@@ -312,17 +310,15 @@ if __name__ == "__main__":
         default=15,
         help="rotation angle range in degrees for augmentation (default: 15)",
     )
-    parser.add_argument('--pretrained',
-                        type=str,
-                        default=None,
-                        help='Path to pretrained ')
+    parser.add_argument(
+        "--pretrained", type=str, default=None, help="Path to pretrained "
+    )
 
-    parser.add_argument("--prune-iters",
-                        type=int,
-                        default=2,
-                        help="number of iteration for pruning")
-    parser.add_argument('--grouped_pruning', type=bool, default=True)
-    parser.add_argument('--conv2d_prune_amount', type=float, default=0.4)
-    parser.add_argument('--linear_prune_amount', type=float, default=0.2)
+    parser.add_argument(
+        "--prune-iters", type=int, default=2, help="number of iteration for pruning"
+    )
+    parser.add_argument("--grouped_pruning", type=bool, default=True)
+    parser.add_argument("--conv2d_prune_amount", type=float, default=0.4)
+    parser.add_argument("--linear_prune_amount", type=float, default=0.2)
     args = parser.parse_args()
     main(args)
