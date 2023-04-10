@@ -110,13 +110,24 @@ def train_model(model, loaders, args, device):
                 logger.scalar_summary("val_dsc", mean_dsc, step)
                 if mean_dsc > best_validation_dsc:
                     best_validation_dsc = mean_dsc
-                    torch.save(
-                        model.state_dict(),
-                        os.path.join(
-                            args.weights, f"unet-int8-{best_validation_dsc}.pt"
-                        ),
-                    )
+                    # torch.save(
+                    #     model.state_dict(),
+                    #     os.path.join(
+                    #         args.weights, f"unet-int8-{best_validation_dsc}.pt"
+                    #     ),
+                    # )
 
+                    model.eval()
+                    model_int8 = torch.ao.quantization.convert(model.to('cpu'), inplace=False)
+
+                    scripted = torch.jit.script(model_int8)
+                    b = io.BytesIO()
+                    torch.jit.save(scripted, b)
+
+                    with open( os.path.join(args.weights, f"unet-int8-{best_validation_dsc}.pt"), 'wb') as outfile:
+                        outfile.write(b.getbuffer())
+
+                    model.to(device)
                 loss_valid = []
     size = os.path.getsize(
         os.path.join(args.weights, f"unet-int8-{best_validation_dsc}.pt")
@@ -144,7 +155,7 @@ def main(args):
 
     model.eval()
     model.fuse_model()
-    model.qconfig = torch.ao.quantization.get_default_qat_qconfig("fbgemm")
+    model.qconfig = torch.ao.quantization.get_default_qat_qconfig("qnnpack")
     torch.ao.quantization.prepare_qat(model.train(), inplace=True)
 
     train_model(model, loaders, args, device)
