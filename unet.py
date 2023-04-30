@@ -4,13 +4,13 @@ import torch
 import torch.nn as nn
 from itertools import islice
 
-
 class UNet(nn.Module):
 
     def __init__(self, in_channels=3, out_channels=1, init_features=32):
         super(UNet, self).__init__()
 
         features = init_features
+        self.quant = torch.ao.quantization.QuantStub()
         self.encoder1 = UNet._block(in_channels, features, name="enc1")
         self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
         self.encoder2 = UNet._block(features, features * 2, name="enc2")
@@ -22,6 +22,7 @@ class UNet(nn.Module):
 
         self.bottleneck = UNet._block(features * 8, features * 16, name="bottleneck")
 
+        self.dequant = torch.ao.quantization.DeQuantStub()
         self.upconv4 = nn.ConvTranspose2d(
             features * 16, features * 8, kernel_size=2, stride=2
         )
@@ -44,6 +45,7 @@ class UNet(nn.Module):
         )
 
     def forward(self, x):
+        x = self.quant(x)
         enc1 = self.encoder1(x)
         enc2 = self.encoder2(self.pool1(enc1))
         enc3 = self.encoder3(self.pool2(enc2))
@@ -63,7 +65,7 @@ class UNet(nn.Module):
         dec1 = self.upconv1(dec2)
         dec1 = torch.cat((dec1, enc1), dim=1)
         dec1 = self.decoder1(dec1)
-        return torch.sigmoid(self.conv(dec1))
+        return self.dequant(torch.sigmoid(self.conv(dec1)))
 
     @staticmethod
     def _block(in_channels, features, name):
@@ -99,12 +101,27 @@ class UNet(nn.Module):
         )
 
     def fuse_model(self):
-        # for m in self.modules():
-        #     if type(m) == nn.Conv2d:
-        #         torch.ao.quantization.fuse_modules(m, ['0', '1', '2'], inplace=True)
+    # for m in self.modules():
+    #     if type(m) == nn.Conv2d:
+    #         torch.ao.quantization.fuse_modules(m, ['0', '1', '2'], inplace=True)
+        print('Fusing module')
 
-        for i, root_m in enumerate(self.modules()):
+        for i, (root_name, root_m) in enumerate(self.named_modules()):
             if type(root_m) == nn.Sequential:
+                prefix = root_name[:3] + root_name[-1]
+                if 'dec' in  root_name :
+                    continue
+                if root_name == 'bottleneck':
+                    continue
+                    # prefix = 'bottleneck'
+                print(root_name)
+                torch.ao.quantization.fuse_modules(root_m, 
+                    [
+                        list( prefix + n for n in ['conv1', 'norm1', 'relu1']), 
+                        # ['conv1', 'norm1', 'relu1']
+                        # [prefix + n for n in ['conv2', 'norm2', 'relu2']]
+                    ], 
+                    inplace=True)
                 # print( '*'*20, i, '*'*20)
                 # print(m)
                 # list_modules = []
@@ -113,8 +130,8 @@ class UNet(nn.Module):
                 #     if type(m) == nn.Conv2d:
                 #         list_modules.append(n)
                 # torch.ao.quantization.fuse_modules(root_m, list_modules, inplace=True)
-                bname = next(islice(iter(root_m.named_modules()), 1, 2))[0].split('conv')[0]
+                # bname = next(islice(iter(root_m.named_modules()), 1, 2))[0].split('conv')[0]
                 
-                list_modules = [[ bname+n+i for n in ['conv', 'norm', 'relu']]  for i in ['1', '2']]
-                # print('list modules: ', list_modules)
-                torch.ao.quantization.fuse_modules(root_m, list_modules, inplace=True)
+                # list_modules = [[ bname+n+i for n in ['conv', 'norm', 'relu']]  for i in ['1', '2']]
+                # # print('list modules: ', list_modules)
+                # torch.ao.quantization.fuse_modules(root_m, list_modules, inplace=True)
