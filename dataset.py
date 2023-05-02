@@ -25,20 +25,23 @@ class BrainSegmentationDataset(Dataset):
         validation_cases=10,
         seed=42,
     ):
-        assert subset in ["all", "train", "val"]
+        assert subset in ["all", "train", "val", "test", "demo"]
 
         # read images
         volumes = []
         masks = []
-        for (dirpath, dirnames,
-             filenames) in os.walk(os.path.join(images_dir, subset, 'images')):
+        for (dirpath, dirnames, filenames) in os.walk(
+            os.path.join(images_dir, subset, "images")
+        ):
 
-            for filename in filter(lambda x: '.jpeg' in x, filenames):
+            filenames = sorted(filter(lambda x: ".jpeg" in x, filenames))
+            for filename in filenames:
                 filepath = os.path.join(dirpath, filename)
                 volumes.append(filepath)
 
-                maskpath = 'mask_images'.join(filepath.rsplit(
-                    'images', 1)).replace('.jpeg', '.png')
+                maskpath = "mask_images".join(filepath.rsplit("images", 1)).replace(
+                    ".jpeg", ".png"
+                )
                 masks.append(maskpath)
 
         # create list of tuples (volume, mask)
@@ -76,7 +79,6 @@ class BrainSegmentationDataset(Dataset):
 
         # add channel dimension to masks
         mask = mask[..., np.newaxis]
-
 
         if self.transform is not None:
             image, mask = self.transform((image, mask))
