@@ -14,6 +14,9 @@ from dataset import BrainSegmentationDataset as Dataset
 from unet import UNet
 from utils import dsc, gray2rgb, outline
 
+from torch.nn.utils import prune
+
+
 
 def main(args):
     makedirs(args)
@@ -23,6 +26,13 @@ def main(args):
 
     with torch.set_grad_enabled(False):
         unet = UNet(in_channels=Dataset.in_channels, out_channels=Dataset.out_channels)
+        parameters_to_prune = []
+
+        for module_name, module in unet.named_modules():
+            if isinstance(module, torch.nn.Conv2d):
+                # parameters_to_prune.append((module, "weight"))
+                prune.identity(module, "weight")
+                
         state_dict = torch.load(args.weights, map_location=device)
         unet.load_state_dict(state_dict)
         unet.eval()
