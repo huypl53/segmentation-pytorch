@@ -14,6 +14,15 @@ from dataset import BrainSegmentationDataset as Dataset
 from unet import UNet
 from utils import dsc, gray2rgb, outline
 
+from bnn import BConfig, prepare_binary_model
+from bnn.ops import BasicInputBinarizer, BasicScaleBinarizer, XNORWeightBinarizer
+
+bconfig = BConfig(
+    activation_pre_process = BasicInputBinarizer,
+    activation_post_process = BasicScaleBinarizer,
+    weight_pre_process = XNORWeightBinarizer.with_args(center_weights=True)
+)
+
 
 def main(args):
     makedirs(args)
@@ -23,6 +32,8 @@ def main(args):
 
     with torch.set_grad_enabled(False):
         unet = UNet(in_channels=Dataset.in_channels, out_channels=Dataset.out_channels)
+        unet = prepare_binary_model(unet, bconfig)
+
         state_dict = torch.load(args.weights, map_location=device)
         unet.load_state_dict(state_dict)
         unet.eval()
