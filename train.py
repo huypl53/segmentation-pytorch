@@ -20,8 +20,10 @@ from unet import UNet
 from utils import log_images, dsc
 
 from bnn import BConfig, prepare_binary_model
+
 # Import a few examples of quantizers
 from bnn.ops import BasicInputBinarizer, BasicScaleBinarizer, XNORWeightBinarizer
+
 
 def main(args):
     makedirs(args)
@@ -35,10 +37,10 @@ def main(args):
 
     # Define the binarization configuration and assign it to the model
     bconfig = BConfig(
-        activation_pre_process = BasicInputBinarizer,
-        activation_post_process = BasicScaleBinarizer,
+        activation_pre_process=BasicInputBinarizer,
+        activation_post_process=BasicScaleBinarizer,
         # optionally, one can pass certain custom variables
-        weight_pre_process = XNORWeightBinarizer.with_args(center_weights=True)
+        weight_pre_process=XNORWeightBinarizer.with_args(center_weights=True),
     )
     # Convert the model appropiately, propagating the changes from parent node to leafs
     # The custom_config_layers_name syntax will perform a match based on the layer name, setting a custom quantization function.
@@ -113,11 +115,16 @@ def main(args):
 
             if phase == "valid":
                 log_loss_summary(logger, loss_valid, step, prefix="val_")
-                if sum([len(validation_pred[i]) for i in range(len(validation_pred))]) > 0:
-                    mean_dsc = np.mean(dsc(
-                        validation_pred,
-                        validation_true,
-                    ))
+                if (
+                    sum([len(validation_pred[i]) for i in range(len(validation_pred))])
+                    > 0
+                ):
+                    mean_dsc = np.mean(
+                        dsc(
+                            validation_pred,
+                            validation_true,
+                        )
+                    )
                 else:
                     mean_dsc = 0
                 logger.scalar_summary("val_dsc", mean_dsc, step)
@@ -125,7 +132,14 @@ def main(args):
                     best_validation_dsc = mean_dsc
                     torch.save(
                         unet.state_dict(),
-                        os.path.join(args.weights, f'unet-{best_validation_dsc}.pt'))
+                        os.path.join(args.weights, f"unet-{best_validation_dsc}.pt"),
+                    )
+                    torch.save(
+                        unet,
+                        os.path.join(
+                            args.weights, f"unet-{best_validation_dsc}-entire.pt"
+                        ),
+                    )
                 loss_valid = []
 
     print("Best validation mean DSC: {:4f}".format(best_validation_dsc))
@@ -161,9 +175,7 @@ def datasets(args):
         images_dir=args.images,
         subset="train",
         image_size=args.image_size,
-        transform=transforms(scale=args.aug_scale,
-                             angle=args.aug_angle,
-                             flip_prob=0.5),
+        transform=transforms(scale=args.aug_scale, angle=args.aug_angle, flip_prob=0.5),
     )
     valid = Dataset(
         images_dir=args.images,
@@ -172,7 +184,6 @@ def datasets(args):
         random_sampling=False,
     )
     return train, valid
-
 
 
 def dsc_per_volume(validation_pred, validation_true, patient_slice_index):
@@ -204,7 +215,8 @@ def snapshotargs(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Training U-Net model for segmentation of brain MRI")
+        description="Training U-Net model for segmentation of brain MRI"
+    )
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -247,18 +259,18 @@ if __name__ == "__main__":
         default=10,
         help="frequency of saving images to log file (default: 10)",
     )
-    parser.add_argument("--weights",
-                        type=str,
-                        default="./weights-binarizer",
-                        help="folder to save weights")
-    parser.add_argument("--logs",
-                        type=str,
-                        default="./logs-binarizer",
-                        help="folder to save logs")
-    parser.add_argument("--images",
-                        type=str,
-                        default="./data",
-                        help="root folder with images")
+    parser.add_argument(
+        "--weights",
+        type=str,
+        default="./weights-binarizer",
+        help="folder to save weights",
+    )
+    parser.add_argument(
+        "--logs", type=str, default="./logs-binarizer", help="folder to save logs"
+    )
+    parser.add_argument(
+        "--images", type=str, default="./data", help="root folder with images"
+    )
     parser.add_argument(
         "--image-size",
         type=int,
