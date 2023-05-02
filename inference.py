@@ -24,7 +24,9 @@ def main(args):
     with torch.set_grad_enabled(False):
         unet = UNet(in_channels=Dataset.in_channels, out_channels=Dataset.out_channels)
         state_dict = torch.load(args.weights, map_location=device)
-        unet.load_state_dict(state_dict)
+        script_model = torch.jit.load('/content/Lasso/submit/weight-prune-vs-quantization/quantizer/weights-utdd-quantizer/unet-int8-0.6909004358891578-script.pt')
+
+        unet.load_state_dict(script_model.state_dict())
         unet.eval()
         unet.to(device)
 
