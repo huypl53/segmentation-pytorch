@@ -106,8 +106,8 @@ def log_images(x, y_true, y_pred, channel=1):
     y_pred_np = y_pred[:, 0].cpu().numpy()
     for i in range(x_np.shape[0]):
         image = gray2rgb(np.squeeze(x_np[i]))
-        image = outline(image, y_pred_np[i], color=[255, 0, 0])
-        image = outline(image, y_true_np[i], color=[0, 255, 0])
+        image = outline(image, y_pred_np[i], color=[ 255, 0, 0])
+        image = outline(image, y_true_np[i], color=[ 0, 255, 0])
         images.append(image)
     return np.array( images ).transpose(0, 3, 1, 2)
 
