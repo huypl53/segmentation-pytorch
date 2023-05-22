@@ -78,22 +78,7 @@ def main(args):
 
     base_macs, base_nparams = tp.utils.count_ops_and_params(unet, example_inputs)
     for i in range(prune_iters):
-        # 3. the pruner.step will remove some channels from the unet with least importance
-        pruner.step()
-
-        # 4. Do whatever you like here, such as fintuning
-        macs, nparams = tp.utils.count_ops_and_params(unet, example_inputs)
-        # print(unet)
-        print(unet(example_inputs).shape)
-        print(
-            "  Iter %d/%d, Params: %.2f M => %.2f M"
-            % (i + 1, prune_iters, base_nparams / 1e6, nparams / 1e6)
-        )
-        print(
-            "  Iter %d/%d, MACs: %.2f G => %.2f G"
-            % (i + 1, prune_iters, base_macs / 1e9, macs / 1e9)
-        )
-
+        epoch_range = int(args.epochs) // int(prune_iters)
         for epoch in tqdm(range(args.epochs), total=args.epochs):
             for phase in ["train", "valid"]:
                 if phase == "train":
@@ -149,36 +134,53 @@ def main(args):
                         log_loss_summary(logger, loss_train, step)
                         loss_train = []
 
-                if phase == "valid":
-                    log_loss_summary(logger, loss_valid, step, prefix="val_")
-                    if (
-                        sum(
-                            [
-                                len(validation_pred[i])
-                                for i in range(len(validation_pred))
-                            ]
-                        )
-                        > 0
-                    ):
-                        mean_dsc = np.mean(
-                            dsc(
-                                validation_pred,
-                                validation_true,
+                if epoch % epoch_range == 0:
+                    # 3. the pruner.step will remove some channels from the unet with least importance
+                    pruner.step()
+
+                    # 4. Do whatever you like here, such as fintuning
+                    macs, nparams = tp.utils.count_ops_and_params(unet, example_inputs)
+                    # print(unet)
+                    print(unet(example_inputs).shape)
+                    print(
+                        "  Iter %d/%d, Params: %.2f M => %.2f M"
+                        % (i + 1, prune_iters, base_nparams / 1e6, nparams / 1e6)
+                    )
+                    print(
+                        "  Iter %d/%d, MACs: %.2f G => %.2f G"
+                        % (i + 1, prune_iters, base_macs / 1e9, macs / 1e9)
+                    )
+
+                    if phase == "valid" :
+                        log_loss_summary(logger, loss_valid, step, prefix="val_")
+                        if (
+                            sum(
+                                [
+                                    len(validation_pred[i])
+                                    for i in range(len(validation_pred))
+                                ]
                             )
-                        )
-                    else:
-                        mean_dsc = 0
-                    logger.scalar_summary("val_dsc", mean_dsc, step)
-                    if mean_dsc > best_validation_dsc:
-                        best_validation_dsc = mean_dsc
-                        torch.save(
-                            # unet.state_dict(),
-                            unet,
-                            os.path.join(
-                                args.weights, f"unet-{best_validation_dsc}-entire.pt"
-                            ),
-                        )
-                    loss_valid = []
+                            > 0
+                        ):
+                            mean_dsc = np.mean(
+                                dsc(
+                                    validation_pred,
+                                    validation_true,
+                                )
+                            )
+                        else:
+                            mean_dsc = 0
+                        logger.scalar_summary("val_dsc", mean_dsc, step)
+                        if mean_dsc > best_validation_dsc:
+                            best_validation_dsc = mean_dsc
+                            torch.save(
+                                # unet.state_dict(),
+                                unet,
+                                os.path.join(
+                                    args.weights, f"unet-{best_validation_dsc}-entire.pt"
+                                ),
+                            )
+                        loss_valid = []
 
     print("Best validation mean DSC: {:4f}".format(best_validation_dsc))
 
